@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
 
-  <title><![CDATA[Architecting Confusion]]></title>
-  <link href="http://jeremyjbowers.github.com/jeremyjbowers/atom.xml" rel="self"/>
+  <title><![CDATA[Category: Lessons | Architecting Confusion]]></title>
+  <link href="http://jeremyjbowers.github.com/jeremyjbowers/blog/categories/lessons/atom.xml" rel="self"/>
   <link href="http://jeremyjbowers.github.com/jeremyjbowers/"/>
   <updated>2011-12-31T00:28:40-05:00</updated>
   <id>http://jeremyjbowers.github.com/jeremyjbowers/</id>
@@ -18,27 +18,26 @@
     <link href="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/"/>
     <updated>2011-12-30T21:14:00-05:00</updated>
     <id>http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish</id>
-    <content type="html"><![CDATA[<p>It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our infrastructure a bit of an early spring cleaning.</p>
+    <content type="html"><![CDATA[<p>It's election season, so there's no better time to get to work on your infrastructure. At the Post, we've been giving our infrastructure a bit of an early spring cleaning.</p>
 
-<p>If you&#8217;re going to survive election traffic, you&#8217;re going to need caching. I recommend Varnish, a slick and speedy reverse-proxy cache which sits in front of your application server and shields your app from the ravening hordes of clients. In this lesson, we&#8217;re going to build out a basic Varnish config and then layer in handy things like URL priming, URL purging via regular expression, and some tricks to keep your site performing well even when you have heavy pages that need to be forcibly expired often.</p>
+<p>If you're going to survive election traffic, you're going to need caching. I recommend Varnish, a slick and speedy reverse-proxy cache which sits in front of your application server and shields your app from the ravening hordes of clients. In this lesson, we're going to build out a basic Varnish config and then layer in handy things like URL priming, URL purging via regular expression, and some tricks to keep your site performing well even when you have heavy pages that need to be forcibly expired often.</p>
 
-<p>Ready? Let&#8217;s get cracking.</p>
+<p>Ready? Let's get cracking.</p>
 
 <!-- more -->
 
 
-<p>There are excellent instructions for compiling and running Varnish on their Web site. There are also several types of fairly useful documentation. This blog post won&#8217;t focus on those things. Instead, I&#8217;m going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
+<p>There are excellent instructions for compiling and running Varnish on their Web site. There are also several types of fairly useful documentation. This blog post won't focus on those things. Instead, I'm going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
 
 <h2>Varnish Configuration</h2>
 
-<p>The Varnish configuration file uses a series of subroutines (&#8220;sub&#8221;) that trace a request through two paths: One path for cache misses, and one path for cache hits. Here&#8217;s the basic pattern:</p>
+<p>The Varnish configuration file uses a series of subroutines ("sub") that trace a request through two paths: One path for cache misses, and one path for cache hits. Here's the basic pattern:</p>
 
 <p><strong>Miss</strong>: sub vcl_recv > sub vcl_miss > sub vcl_fetch > sub vcl_deliver</p>
 
 <p><strong>Hit</strong>: sub vcl_recv > sub vcl_hit > sub vcl_deliver</p>
 
-<p>A complete Varnish configuration file will need to contain directions for both of these paths. This is a bare-bones VCL, commented for your viewing pleasure.</p>
-
+<p>A complete Varnish configuration file will need to contain directions for both of these paths. This is a bare-bones VCL, commented for your viewing pleasure.
 <div><script src='https://gist.github.com/1542949.js?file='></script>
 <noscript><pre><code>/*
 *
@@ -123,10 +122,9 @@ sub vcl_deliver {
     # Note: Both cache hits and cache misses will use this subroutine.
     return(deliver);
 }</code></pre></noscript></div>
+</p>
 
-
-<p>Here&#8217;s a much more complex VCL with support for PURGE, PRIME and some tricks for jQuery AJAX and parsing JSON.</p>
-
+<p>Here's a much more complex VCL with support for PURGE, PRIME and some tricks for jQuery AJAX and parsing JSON.
 <div><script src='https://gist.github.com/1542992.js?file='></script>
 <noscript><pre><code>/*
 *
@@ -290,7 +288,7 @@ sub vcl_deliver {
     
     return(deliver);
 }</code></pre></noscript></div>
-
+</p>
 ]]></content>
   </entry>
   

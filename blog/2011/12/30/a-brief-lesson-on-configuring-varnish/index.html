@@ -1,24 +1,96 @@
-<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
 
-  <title><![CDATA[Architecting Confusion]]></title>
-  <link href="http://jeremyjbowers.github.com/jeremyjbowers/atom.xml" rel="self"/>
-  <link href="http://jeremyjbowers.github.com/jeremyjbowers/"/>
-  <updated>2011-12-31T00:28:40-05:00</updated>
-  <id>http://jeremyjbowers.github.com/jeremyjbowers/</id>
-  <author>
-    <name><![CDATA[Jeremy Bowers]]></name>
-    <email><![CDATA[jeremyjbowers@gmail.com]]></email>
-  </author>
-  <generator uri="http://octopress.org/">Octopress</generator>
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>A brief lesson on configuring Varnish - Architecting Confusion</title>
+  <meta name="author" content="Jeremy Bowers">
 
   
-  <entry>
-    <title type="html"><![CDATA[A brief lesson on configuring Varnish]]></title>
-    <link href="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/"/>
-    <updated>2011-12-30T21:14:00-05:00</updated>
-    <id>http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish</id>
-    <content type="html"><![CDATA[<p>It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our infrastructure a bit of an early spring cleaning.</p>
+  <meta name="description" content="It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our &hellip;">
+  
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  
+  <link rel="canonical" href="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish">
+  <link href="/jeremyjbowers/favicon.png" rel="icon">
+  <link href="/jeremyjbowers/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
+  <script src="/jeremyjbowers/javascripts/modernizr-2.0.js"></script>
+  <script src="/jeremyjbowers/javascripts/ender.js"></script>
+  <script src="/jeremyjbowers/javascripts/octopress.js" type="text/javascript"></script>
+  <link href="/jeremyjbowers/atom.xml" rel="alternate" title="Architecting Confusion" type="application/atom+xml">
+  <!--Fonts from Google"s Web font directory at http://google.com/webfonts -->
+<link href="http://fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+<link href="http://fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+
+  
+
+</head>
+
+<body   >
+  <header role="banner"><hgroup>
+  <h1><a href="/jeremyjbowers/">Architecting Confusion</a></h1>
+  
+    <h2>Bespoke code in the District</h2>
+  
+</hgroup>
+
+</header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+  <li><a href="/jeremyjbowers/atom.xml" rel="subscribe-rss" title="subscribe via RSS">RSS</a></li>
+  
+</ul>
+  
+<form action="http://google.com/search" method="get">
+  <fieldset role="search">
+    <input type="hidden" name="q" value="site:jeremyjbowers.github.com/jeremyjbowers" />
+    <input class="search" type="text" name="q" results="0" placeholder="Search"/>
+  </fieldset>
+</form>
+  
+<ul class="main-navigation">
+  <li><a href="/jeremyjbowers/">Blog</a></li>
+  <li><a href="/jeremyjbowers/blog/archives">Archives</a></li>
+</ul>
+
+</nav>
+  <div id="main">
+    <div id="content">
+      <div>
+<article class="hentry" role="article">
+  
+  <header>
+    
+      <h1 class="entry-title">A Brief Lesson on Configuring Varnish</h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+
+
+
+
+  
+
+
+<time datetime="2011-12-30T21:14:00-05:00" pubdate data-updated="true">Dec 30<span>th</span>, 2011</time>
+        
+      </p>
+    
+  </header>
+
+
+<div class="entry-content"><p>It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our infrastructure a bit of an early spring cleaning.</p>
 
 <p>If you&#8217;re going to survive election traffic, you&#8217;re going to need caching. I recommend Varnish, a slick and speedy reverse-proxy cache which sits in front of your application server and shields your app from the ravening hordes of clients. In this lesson, we&#8217;re going to build out a basic Varnish config and then layer in handy things like URL priming, URL purging via regular expression, and some tricks to keep your site performing well even when you have heavy pages that need to be forcibly expired often.</p>
 
@@ -291,7 +363,151 @@ sub vcl_deliver {
     return(deliver);
 }</code></pre></noscript></div>
 
-]]></content>
-  </entry>
+</div>
+
+
+  <footer>
+    <p class="meta">
+      
   
-</feed>
+
+<span class="byline author vcard">Posted by <span class="fn">Jeremy Bowers</span></span>
+
+      
+
+
+
+
+
+
+
+
+  
+
+
+<time datetime="2011-12-30T21:14:00-05:00" pubdate data-updated="true">Dec 30<span>th</span>, 2011</time>
+      
+
+<span class="categories">
+  
+    <a class='category' href='/jeremyjbowers/blog/categories/infrastructure/'>Infrastructure</a>, <a class='category' href='/jeremyjbowers/blog/categories/lessons/'>Lessons</a>, <a class='category' href='/jeremyjbowers/blog/categories/varnish/'>Varnish</a>
+  
+</span>
+
+
+    </p>
+    
+      <div class="sharing">
+  
+  <a href="http://twitter.com/share" class="twitter-share-button" data-url="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/" data-via="jeremybowers" data-counturl="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/" >Tweet</a>
+  
+  
+  
+</div>
+
+    
+    <p class="meta">
+      
+      
+    </p>
+  </footer>
+</article>
+
+</div>
+
+<aside class="sidebar">
+  
+    <section>
+  <h1>Recent Posts</h1>
+  <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/">A brief lesson on configuring Varnish</a>
+      </li>
+    
+  </ul>
+</section>
+
+<section>
+  <h1>Github Repos</h1>
+  <ul id="gh_repos">
+    <li class="loading">Status updating...</li>
+  </ul>
+  
+  <a href="https://github.com/jeremyjbowers">@jeremyjbowers</a> on Github
+  
+  <script type="text/javascript">
+    $.domReady(function(){
+        if (!window.jXHR){
+            var jxhr = document.createElement('script');
+            jxhr.type = 'text/javascript';
+            jxhr.src = '/javascripts/libs/jXHR.js';
+            var s = document.getElementsByTagName('script')[0];
+            s.parentNode.insertBefore(jxhr, s);
+        }
+
+        github.showRepos({
+            user: 'jeremyjbowers',
+            count: 5,
+            skip_forks: true,
+            target: '#gh_repos'
+        });
+    });
+  </script>
+  <script src="/jeremyjbowers/javascripts/github.js" type="text/javascript"> </script>
+</section>
+
+
+<section>
+  <h1>Latest Tweets</h1>
+  <ul id="tweets">
+    <li class="loading">Status updating...</li>
+  </ul>
+  <script type="text/javascript">
+    $.domReady(function(){
+      getTwitterFeed("jeremybowers", 5, false);
+    });
+  </script>
+  <script src="/jeremyjbowers/javascripts/twitter.js" type="text/javascript"> </script>
+  
+    <a href="http://twitter.com/jeremybowers" class="twitter-follow-button" data-show-count="false">Follow @jeremybowers</a>
+  
+</section>
+
+
+  
+</aside>
+
+
+    </div>
+  </div>
+  <footer role="contentinfo"><p>
+  Copyright &copy; 2011 - Jeremy Bowers -
+  <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
+</p>
+
+</footer>
+  
+
+
+
+
+
+
+
+  <script type="text/javascript">
+    (function(){
+      var twitterWidgets = document.createElement('script');
+      twitterWidgets.type = 'text/javascript';
+      twitterWidgets.async = true;
+      twitterWidgets.src = 'http://platform.twitter.com/widgets.js';
+      document.getElementsByTagName('head')[0].appendChild(twitterWidgets);
+    })();
+  </script>
+
+
+
+
+
+</body>
+</html>
