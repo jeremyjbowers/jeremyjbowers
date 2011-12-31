@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Varnish | Architecting Confusion]]></title>
   <link href="http://jeremyjbowers.github.com/jeremyjbowers/blog/categories/varnish/atom.xml" rel="self"/>
   <link href="http://jeremyjbowers.github.com/jeremyjbowers/"/>
-  <updated>2011-12-31T00:28:40-05:00</updated>
+  <updated>2011-12-31T00:49:02-05:00</updated>
   <id>http://jeremyjbowers.github.com/jeremyjbowers/</id>
   <author>
     <name><![CDATA[Jeremy Bowers]]></name>
@@ -27,7 +27,9 @@
 <!-- more -->
 
 
-<p>There are excellent instructions for compiling and running Varnish on their Web site. There are also several types of fairly useful documentation. This blog post won't focus on those things. Instead, I'm going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
+<p>There are excellent instructions for <a href="https://www.varnish-cache.org/docs/3.0/installation/install.html">installing</a> and <a href="https://www.varnish-cache.org/docs/3.0/tutorial/index.html">running</a> Varnish on <a href="https://www.varnish-cache.org/">their Web site</a>. There are also several types of <a href="https://www.varnish-cache.org/docs/trunk/tutorial/handling_misbehaving_servers.html">fairly</a> <a href="https://www.varnish-cache.org/trac/wiki/Performance">useful</a> <a href="https://www.varnish-cache.org/trac/wiki/VCLExampleGrace">documentation</a>.</p>
+
+<p>This blog post won't focus on those things. Instead, I'm going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
 
 <h2>Varnish Configuration</h2>
 
@@ -289,6 +291,8 @@ sub vcl_deliver {
     return(deliver);
 }</code></pre></noscript></div>
 </p>
+
+<p>This sums up almost everything I had to learn about configuring Varnish this week, especially the bits about jQuery and grace mode.</p>
 ]]></content>
   </entry>
   
