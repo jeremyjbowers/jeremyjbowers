@@ -1,0 +1,572 @@
+
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>A brief lesson on configuring Varnish - Architecting Confusion</title>
+  <meta name="author" content="Jeremy Bowers">
+
+  
+  <meta name="description" content="It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our &hellip;">
+  
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  
+  <link rel="canonical" href="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish">
+  <link href="/jeremyjbowers/favicon.png" rel="icon">
+  <link href="/jeremyjbowers/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
+  <script src="/jeremyjbowers/javascripts/modernizr-2.0.js"></script>
+  <script src="/jeremyjbowers/javascripts/ender.js"></script>
+  <script src="/jeremyjbowers/javascripts/octopress.js" type="text/javascript"></script>
+  <link href="/jeremyjbowers/atom.xml" rel="alternate" title="Architecting Confusion" type="application/atom+xml">
+  <!--Fonts from Google"s Web font directory at http://google.com/webfonts -->
+<link href="http://fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+<link href="http://fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+
+  
+  <script type="text/javascript">
+    var _gaq = _gaq || [];
+    _gaq.push(['_setAccount', 'UA-28047044-1']);
+    _gaq.push(['_trackPageview']);
+
+    (function() {
+      var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+      ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+      var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+    })();
+  </script>
+
+
+</head>
+
+<body   >
+  <header role="banner"><hgroup>
+  <h1><a href="/jeremyjbowers/">Architecting Confusion</a></h1>
+  
+    <h2>Bespoke code in the District</h2>
+  
+</hgroup>
+
+</header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+  <li><a href="/jeremyjbowers/atom.xml" rel="subscribe-rss" title="subscribe via RSS">RSS</a></li>
+  
+</ul>
+  
+<form action="http://google.com/search" method="get">
+  <fieldset role="search">
+    <input type="hidden" name="q" value="site:jeremyjbowers.github.com/jeremyjbowers" />
+    <input class="search" type="text" name="q" results="0" placeholder="Search"/>
+  </fieldset>
+</form>
+  
+<ul class="main-navigation">
+  <li><a href="/jeremyjbowers/">Blog</a></li>
+  <li><a href="/jeremyjbowers/blog/archives">Archives</a></li>
+</ul>
+
+</nav>
+  <div id="main">
+    <div id="content">
+      <div>
+<article class="hentry" role="article">
+  
+  <header>
+    
+      <h1 class="entry-title">A Brief Lesson on Configuring Varnish</h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+
+
+
+
+  
+
+
+<time datetime="2011-12-30T21:14:00-05:00" pubdate data-updated="true">Dec 30<span>th</span>, 2011</time>
+        
+      </p>
+    
+  </header>
+
+
+<div class="entry-content"><p>It&#8217;s election season, so there&#8217;s no better time to get to work on your infrastructure. At the Post, we&#8217;ve been giving our infrastructure a bit of an early spring cleaning.</p>
+
+<p>If you&#8217;re going to survive election traffic, you&#8217;re going to need caching. I recommend Varnish, a slick and speedy reverse-proxy cache which sits in front of your application server and shields your app from the ravening hordes of clients. In this lesson, we&#8217;re going to build out a basic Varnish config and then layer in handy things like URL priming, URL purging via regular expression, and some tricks to keep your site performing well even when you have heavy pages that need to be forcibly expired often.</p>
+
+<p>Ready? Let&#8217;s get cracking.</p>
+
+<!-- more -->
+
+
+<p>There are excellent instructions for <a href="https://www.varnish-cache.org/docs/3.0/installation/install.html">installing</a> and <a href="https://www.varnish-cache.org/docs/3.0/tutorial/index.html">running</a> Varnish on <a href="https://www.varnish-cache.org/">their Web site</a>. There are also several types of <a href="https://www.varnish-cache.org/docs/trunk/tutorial/handling_misbehaving_servers.html">fairly</a> <a href="https://www.varnish-cache.org/trac/wiki/Performance">useful</a> <a href="https://www.varnish-cache.org/trac/wiki/VCLExampleGrace">documentation</a>.</p>
+
+<p>This blog post won&#8217;t focus on those things. Instead, I&#8217;m going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
+
+<h2>Varnish Configuration</h2>
+
+<p>The Varnish configuration file uses a series of subroutines (&#8220;sub&#8221;) that trace a request through two paths: One path for cache misses, and one path for cache hits. Here&#8217;s the basic pattern:</p>
+
+<p><strong>Miss</strong>: sub vcl_recv > sub vcl_miss > sub vcl_fetch > sub vcl_deliver</p>
+
+<p><strong>Hit</strong>: sub vcl_recv > sub vcl_hit > sub vcl_deliver</p>
+
+<p>A complete Varnish configuration file will need to contain directions for both of these paths. This is a bare-bones VCL, commented for your viewing pleasure.</p>
+
+<div><script src='https://gist.github.com/1542949.js?file='></script>
+<noscript><pre><code>/*
+*
+* First, set up a backend to answer the request if there's not a cache hit.
+*
+*/
+backend default {
+
+    # Set a host.
+    .host = &quot;192.168.1.100&quot;;
+
+    # Set a port. 80 is normal Web traffic.
+    .port = &quot;8000&quot;;
+}
+/*
+*
+* Next, configure the &quot;receive&quot; subroutine.
+*
+*/
+sub vcl_recv {
+    
+    # Use the backend we set up above to answer the request if it's not cached.
+    set req.backend = default;
+    
+    # Pass the request along to lookup to see if it's in the cache.    
+    return(lookup);
+}
+/*
+*
+* Next, let's set up the subroutine to deal with cache misses.
+*
+*/
+sub vcl_miss {
+    
+    # We're not doing anything fancy. Just pass the request along to the
+    # subroutine which will fetch something from the backend.
+    return(fetch);
+}
+/*
+*
+* Now, let's set up a subroutine to deal with cache hits.
+*
+*/
+sub vcl_hit {
+    
+    # Again, nothing fancy. Just pass the request along to the subroutine
+    # which will deliver a result from the cache.
+    return(deliver);
+}
+/*
+*
+* This is the subroutine which will fetch a response from the backend.
+* It's pretty fancy because this is where the basic logic for caching is set.
+*
+*/
+sub vcl_fetch {
+
+    # Get the response. Set the cache lifetime of the response to 1 hour.
+    set beresp.ttl = 1h;
+
+    # Indicate that this response is cacheable. This is important.
+    set beresp.http.X-Cacheable = &quot;YES&quot;;
+    
+    # Some backends *cough* Django *cough* will assign a Vary header for
+    # each User-Agent which visits the site. Varnish will store a separate
+    # copy of the page in the cache for each instance of the Vary header --
+    # one for each User-Agent which visits the site. This is bad. So we're
+    # going to strip away the Vary header.
+    unset beresp.http.Vary;
+    
+    # Now pass this backend response along to the cache to be stored and served.
+    return(deliver);
+}
+/*
+*
+* Finally, let's set up a subroutine which will deliver a response to the client.
+*
+*/
+sub vcl_deliver {
+    
+    # Nothing fancy. Just deliver the goods.
+    # Note: Both cache hits and cache misses will use this subroutine.
+    return(deliver);
+}</code></pre></noscript></div>
+
+
+<p>Here&#8217;s a much more complex VCL with support for PURGE, PRIME and some tricks for jQuery AJAX and parsing JSON.</p>
+
+<div><script src='https://gist.github.com/1542992.js?file='></script>
+<noscript><pre><code>/*
+*
+* Instead of a single backend, let's set up a more complex multi-server director.
+* This director will randomly assign each request to one of three application servers.
+*
+*/
+director backend random {
+    .retries = 5;
+    {
+        .backend  = {
+            .host = &quot;a.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+    {
+        .backend  = {
+            .host = &quot;b.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+    {
+        .backend  = {
+            .host = &quot;c.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+}
+/*
+*
+* Next, let's prepare a feature where we can purge or prime URLs.
+* We don't want just anyone to do this. So we'll limit this special
+* request type to only people on the local network.
+*
+*/
+acl purge_prime {
+    &quot;127.0.0.1&quot;;
+    &quot;10.0.0.0&quot;/8;
+    &quot;172.16.0.0&quot;/12;
+}
+/*
+*
+* Let's set up the receive subroutine for incoming traffic.
+*
+*/
+sub vcl_recv {
+
+    # First, check to see if this is a special PURGE request.
+    # If it is, and the client isn't in our special access
+    # control list above, send them a cheeky message.
+    if (req.request == &quot;PURGE&quot;) {
+        if (!client.ip ~ purge_prime) {
+            error 405 &quot;No purge for you. (&quot; + client.ip + &quot;)&quot;;
+        }
+    }
+
+    # Same for PRIME requests. 
+    if (req.request == &quot;PRIME&quot;) {
+        if (!client.ip ~ purge_prime) {
+            error 405 &quot;No priming for you. (&quot; + client.ip + &quot;)&quot;;
+        }
+    }
+    
+    # You know, people really like to use jQuery.
+    # The jQuery $.ajax() and similar functions will pull JSON from an API
+    # behind your Varnish server. Sadly, browsers will cache the JSON
+    # response basically forever unless you use the cache: false declaration.
+    #
+    # In practice, this just appends a new URL parameter to the request, like
+    # &amp;_=1234567890, but it changes with each request. This sucks for caching.
+    #
+    # This function performs a regex substitution. The regex here matches
+    # URL parameters that start with ? or &amp;, follow with _= and then
+    # contain up to 25 other characters EXCEPT for an ampersand.
+    # An ampersand means that we're starting a second URL parameter.
+    #
+    # By stripping this parameter out, we can serve a cached response for
+    # the ever-changing URL since all but the &amp;_= parameter stay identical.
+    set req.url = regsuball(req.url,&quot;[?&amp;]_=[^&amp;]{1,25}&quot;,&quot;&quot;);
+    
+    # Set the backend to our director above.
+    set req.backend = backend;
+    
+    # Grace mode is magical. When you have a request for an object that is in
+    # the cache but has expired, Grace mode will continue to serve the old
+    # expired cache object for everyone except for the very first client
+    # to ask for it. Once the updated response is available for that first
+    # client, all of the other clients will then get the updated response.
+    #
+    # By setting grace to 5 minutes, we tell Varnish to continue to serve
+    # an outdated object for up to 5 minutes past its expiration to cover
+    # us while we fetch an updated response. Works great for slow pages.
+    set req.grace = 5m;
+    
+    # Pass the request along to the cache lookup.
+    return(lookup);
+}
+/*
+*
+* The cache miss subroutine.
+*
+*/
+sub vcl_miss {
+
+    # If someone sends along a PURGE request from our special list of
+    # acceptable addresses, we need to ban a stack of URLs.
+    #
+    # PURGE will look for a regular expression of matching URLs, something
+    # like this: curl -X PURGE &quot;http://my.site/ban/these/urls/.*&quot;
+    #
+    # The request above will ban all of the following URLs from cache:
+    #   http://my.site/ban/these/urls/like/this/url/
+    #   http://my.site/ban/these/urls/like/that/url/
+    #   http://my.site/ban/these/urls/even/this/?monkey=hammer&amp;foo=baz
+    if (req.request == &quot;PURGE&quot;) {
+        ban_url(req.url);
+        error 200 &quot;Miss and banned, sire.&quot;;
+    }
+    return(fetch);
+}
+
+sub vcl_hit {
+    if (req.request == &quot;PURGE&quot;) {
+        ban_url(req.url);
+        error 200 &quot;Hit and banned, sire.&quot;;
+    }
+    if (req.request == &quot;PRIME&quot;) {
+        set obj.ttl = 1s;
+        error 200 &quot;USDA PRIME.&quot;;
+    }
+    return(deliver);
+}
+
+sub vcl_fetch {
+    set beresp.ttl = 1h;
+    
+    set beresp.grace = 1h;
+    
+    set beresp.http.X-Cacheable = &quot;YES&quot;;
+    
+    unset beresp.http.Vary;
+    
+    return(deliver);
+}
+
+sub vcl_deliver {
+    if (obj.hits &gt; 0) {
+        set resp.http.X-Cache = &quot;HIT&quot;;    
+        set resp.http.X-Cache-Hits = obj.hits;
+        set resp.http.X-Cache-Backend = req.backend;
+    } else {
+        set resp.http.X-Cache = &quot;MISS&quot;;    
+    }
+    
+    set resp.http.X-Served-By = server.hostname;
+    
+    set resp.http.X-Riding-On-This = &quot;The first amendment to the Constitution, the freedom of the press, and maybe the future of the country.&quot;;
+    
+    return(deliver);
+}</code></pre></noscript></div>
+
+
+<p>This sums up almost everything I had to learn about configuring Varnish this week, especially the bits about jQuery and grace mode.</p>
+</div>
+
+
+  <footer>
+    <p class="meta">
+      
+  
+
+<span class="byline author vcard">Posted by <span class="fn">Jeremy Bowers</span></span>
+
+      
+
+
+
+
+
+
+
+
+  
+
+
+<time datetime="2011-12-30T21:14:00-05:00" pubdate data-updated="true">Dec 30<span>th</span>, 2011</time>
+      
+
+<span class="categories">
+  
+    <a class='category' href='/jeremyjbowers/blog/categories/infrastructure/'>Infrastructure</a>, <a class='category' href='/jeremyjbowers/blog/categories/lessons/'>Lessons</a>, <a class='category' href='/jeremyjbowers/blog/categories/varnish/'>Varnish</a>
+  
+</span>
+
+
+    </p>
+    
+      <div class="sharing">
+  
+  <a href="http://twitter.com/share" class="twitter-share-button" data-url="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/" data-via="jeremybowers" data-counturl="http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/" >Tweet</a>
+  
+  
+  <div class="g-plusone" data-size="medium"></div>
+  
+  
+    <div class="fb-like" data-send="true" data-width="450" data-show-faces="false"></div>
+  
+</div>
+
+    
+    <p class="meta">
+      
+      
+    </p>
+  </footer>
+</article>
+
+  <section>
+    <h1>Comments</h1>
+    <div id="disqus_thread" aria-live="polite"><noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+</div>
+  </section>
+
+</div>
+
+<aside class="sidebar">
+  
+    <section>
+  <h1>Recent Posts</h1>
+  <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/">A brief lesson on configuring Varnish</a>
+      </li>
+    
+  </ul>
+</section>
+
+<section>
+  <h1>Github Repos</h1>
+  <ul id="gh_repos">
+    <li class="loading">Status updating...</li>
+  </ul>
+  
+  <a href="https://github.com/jeremyjbowers">@jeremyjbowers</a> on Github
+  
+  <script type="text/javascript">
+    $.domReady(function(){
+        if (!window.jXHR){
+            var jxhr = document.createElement('script');
+            jxhr.type = 'text/javascript';
+            jxhr.src = '/javascripts/libs/jXHR.js';
+            var s = document.getElementsByTagName('script')[0];
+            s.parentNode.insertBefore(jxhr, s);
+        }
+
+        github.showRepos({
+            user: 'jeremyjbowers',
+            count: 1,
+            skip_forks: true,
+            target: '#gh_repos'
+        });
+    });
+  </script>
+  <script src="/jeremyjbowers/javascripts/github.js" type="text/javascript"> </script>
+</section>
+
+
+<section>
+  <h1>Latest Tweets</h1>
+  <ul id="tweets">
+    <li class="loading">Status updating...</li>
+  </ul>
+  <script type="text/javascript">
+    $.domReady(function(){
+      getTwitterFeed("jeremybowers", 5, false);
+    });
+  </script>
+  <script src="/jeremyjbowers/javascripts/twitter.js" type="text/javascript"> </script>
+  
+    <a href="http://twitter.com/jeremybowers" class="twitter-follow-button" data-show-count="false">Follow @jeremybowers</a>
+  
+</section>
+
+
+  
+</aside>
+
+
+    </div>
+  </div>
+  <footer role="contentinfo"><p>
+  Copyright &copy; 2012 - Jeremy Bowers -
+  <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
+</p>
+
+</footer>
+  
+
+<script type="text/javascript">
+      var disqus_shortname = 'jeremy-bowers-blog';
+      
+        
+        // var disqus_developer = 1;
+        var disqus_identifier = 'http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/';
+        var disqus_url = 'http://jeremyjbowers.github.com/jeremyjbowers/blog/2011/12/30/a-brief-lesson-on-configuring-varnish/';
+        var disqus_script = 'embed.js';
+      
+    (function () {
+      var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+      dsq.src = 'http://' + disqus_shortname + '.disqus.com/' + disqus_script;
+      (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+    }());
+</script>
+
+
+
+<div id="fb-root"></div>
+<script>(function(d, s, id) {
+  var js, fjs = d.getElementsByTagName(s)[0];
+  if (d.getElementById(id)) {return;}
+  js = d.createElement(s); js.id = id;
+  js.src = "//connect.facebook.net/en_US/all.js#appId=212934732101925&xfbml=1";
+  fjs.parentNode.insertBefore(js, fjs);
+}(document, 'script', 'facebook-jssdk'));</script>
+
+
+
+  <script type="text/javascript">
+    (function() {
+      var script = document.createElement('script'); script.type = 'text/javascript'; script.async = true;
+      script.src = 'https://apis.google.com/js/plusone.js';
+      var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(script, s);
+    })();
+  </script>
+
+
+
+  <script type="text/javascript">
+    (function(){
+      var twitterWidgets = document.createElement('script');
+      twitterWidgets.type = 'text/javascript';
+      twitterWidgets.async = true;
+      twitterWidgets.src = 'http://platform.twitter.com/widgets.js';
+      document.getElementsByTagName('head')[0].appendChild(twitterWidgets);
+    })();
+  </script>
+
+
+
+
+
+</body>
+</html>
