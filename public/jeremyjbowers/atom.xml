@@ -297,5 +297,4 @@ sub vcl_deliver {
 <p>This sums up almost everything I had to learn about configuring Varnish this week, especially the bits about jQuery and grace mode.</p>
 ]]></content>
   </entry>
-  
 </feed>
