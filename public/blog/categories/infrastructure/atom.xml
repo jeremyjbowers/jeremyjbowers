@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Infrastructure | Architecting Confusion]]></title>
+  <link href="http://jeremy-blog.heroku.com//blog/categories/infrastructure/atom.xml" rel="self"/>
+  <link href="http://jeremy-blog.heroku.com//"/>
+  <updated>2012-01-09T22:18:45-05:00</updated>
+  <id>http://jeremy-blog.heroku.com//</id>
+  <author>
+    <name><![CDATA[Jeremy Bowers]]></name>
+    <email><![CDATA[jeremyjbowers@gmail.com]]></email>
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[A brief lesson on configuring Varnish]]></title>
+    <link href="http://jeremy-blog.heroku.com//blog/2011/12/30/a-brief-lesson-on-configuring-varnish/"/>
+    <updated>2011-12-30T21:14:00-05:00</updated>
+    <id>http://jeremy-blog.heroku.com//blog/2011/12/30/a-brief-lesson-on-configuring-varnish</id>
+    <content type="html"><![CDATA[<p>It's election season, so there's no better time to get to work on your infrastructure. At the Post, we've been giving our infrastructure a bit of an early spring cleaning.</p>
+
+<p>If you're going to survive election traffic, you're going to need caching. I recommend Varnish, a slick and speedy reverse-proxy cache which sits in front of your application server and shields your app from the ravening hordes of clients. In this lesson, we're going to build out a basic Varnish config and then layer in handy things like URL priming, URL purging via regular expression, and some tricks to keep your site performing well even when you have heavy pages that need to be forcibly expired often.</p>
+
+<p>Ready? Let's get cracking.</p>
+
+<!-- more -->
+
+
+<p>There are excellent instructions for <a href="https://www.varnish-cache.org/docs/3.0/installation/install.html">installing</a> and <a href="https://www.varnish-cache.org/docs/3.0/tutorial/index.html">running</a> Varnish on <a href="https://www.varnish-cache.org/">their Web site</a>. There are also several types of <a href="https://www.varnish-cache.org/docs/trunk/tutorial/handling_misbehaving_servers.html">fairly</a> <a href="https://www.varnish-cache.org/trac/wiki/Performance">useful</a> <a href="https://www.varnish-cache.org/trac/wiki/VCLExampleGrace">documentation</a>.</p>
+
+<p>This blog post won't focus on those things. Instead, I'm going to focus on the stuff I think is missing. The first thing I want to explain is how to build a Varnish configuration file.</p>
+
+<h2>Varnish Configuration</h2>
+
+<p>The Varnish configuration file uses a series of subroutines ("sub") that trace a request through two paths: One path for cache misses, and one path for cache hits. Here's the basic pattern:</p>
+
+<p><strong>Miss</strong>: sub vcl_recv > sub vcl_miss > sub vcl_fetch > sub vcl_deliver</p>
+
+<p><strong>Hit</strong>: sub vcl_recv > sub vcl_hit > sub vcl_deliver</p>
+
+<p>A complete Varnish configuration file will need to contain directions for both of these paths. This is a bare-bones VCL, commented for your viewing pleasure.
+<div><script src='https://gist.github.com/1542949.js?file='></script>
+<noscript><pre><code>/*
+*
+* First, set up a backend to answer the request if there's not a cache hit.
+*
+*/
+backend default {
+
+    # Set a host.
+    .host = &quot;192.168.1.100&quot;;
+
+    # Set a port. 80 is normal Web traffic.
+    .port = &quot;8000&quot;;
+}
+/*
+*
+* Next, configure the &quot;receive&quot; subroutine.
+*
+*/
+sub vcl_recv {
+    
+    # Use the backend we set up above to answer the request if it's not cached.
+    set req.backend = default;
+    
+    # Pass the request along to lookup to see if it's in the cache.    
+    return(lookup);
+}
+/*
+*
+* Next, let's set up the subroutine to deal with cache misses.
+*
+*/
+sub vcl_miss {
+    
+    # We're not doing anything fancy. Just pass the request along to the
+    # subroutine which will fetch something from the backend.
+    return(fetch);
+}
+/*
+*
+* Now, let's set up a subroutine to deal with cache hits.
+*
+*/
+sub vcl_hit {
+    
+    # Again, nothing fancy. Just pass the request along to the subroutine
+    # which will deliver a result from the cache.
+    return(deliver);
+}
+/*
+*
+* This is the subroutine which will fetch a response from the backend.
+* It's pretty fancy because this is where the basic logic for caching is set.
+*
+*/
+sub vcl_fetch {
+
+    # Get the response. Set the cache lifetime of the response to 1 hour.
+    set beresp.ttl = 1h;
+
+    # Indicate that this response is cacheable. This is important.
+    set beresp.http.X-Cacheable = &quot;YES&quot;;
+    
+    # Some backends *cough* Django *cough* will assign a Vary header for
+    # each User-Agent which visits the site. Varnish will store a separate
+    # copy of the page in the cache for each instance of the Vary header --
+    # one for each User-Agent which visits the site. This is bad. So we're
+    # going to strip away the Vary header.
+    unset beresp.http.Vary;
+    
+    # Now pass this backend response along to the cache to be stored and served.
+    return(deliver);
+}
+/*
+*
+* Finally, let's set up a subroutine which will deliver a response to the client.
+*
+*/
+sub vcl_deliver {
+    
+    # Nothing fancy. Just deliver the goods.
+    # Note: Both cache hits and cache misses will use this subroutine.
+    return(deliver);
+}</code></pre></noscript></div>
+</p>
+
+<p>Here's a much more complex VCL with support for PURGE, PRIME and some tricks for jQuery AJAX and parsing JSON.
+<div><script src='https://gist.github.com/1542992.js?file='></script>
+<noscript><pre><code>/*
+*
+* Instead of a single backend, let's set up a more complex multi-server director.
+* This director will randomly assign each request to one of three application servers.
+*
+*/
+director backend random {
+    .retries = 5;
+    {
+        .backend  = {
+            .host = &quot;a.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+    {
+        .backend  = {
+            .host = &quot;b.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+    {
+        .backend  = {
+            .host = &quot;c.website.com&quot;;
+            .port = &quot;8000&quot;;
+        }
+        .weight = 1;
+    }
+}
+/*
+*
+* Next, let's prepare a feature where we can purge or prime URLs.
+* We don't want just anyone to do this. So we'll limit this special
+* request type to only people on the local network.
+*
+*/
+acl purge_prime {
+    &quot;127.0.0.1&quot;;
+    &quot;10.0.0.0&quot;/8;
+    &quot;172.16.0.0&quot;/12;
+}
+/*
+*
+* Let's set up the receive subroutine for incoming traffic.
+*
+*/
+sub vcl_recv {
+
+    # First, check to see if this is a special PURGE request.
+    # If it is, and the client isn't in our special access
+    # control list above, send them a cheeky message.
+
+    if (req.request == &quot;PURGE&quot;) {
+        if (!client.ip ~ purge_prime) {
+            error 405 &quot;No purge for you. (&quot; + client.ip + &quot;)&quot;;
+        }
+    }
+
+    # Same for PRIME requests. 
+
+    if (req.request == &quot;PRIME&quot;) {
+        if (!client.ip ~ purge_prime) {
+            error 405 &quot;No priming for you. (&quot; + client.ip + &quot;)&quot;;
+        }
+    }
+    
+    # You know, people really like to use jQuery.
+    # The jQuery $.ajax() and similar functions will pull JSON from an API
+    # behind your Varnish server. Sadly, browsers will cache the JSON
+    # response basically forever unless you use the cache: false declaration.
+    #
+    # In practice, this just appends a new URL parameter to the request, like
+    # &amp;_=1234567890, but it changes with each request. This sucks for caching.
+    #
+    # This function performs a regex substitution. The regex here matches
+    # URL parameters that start with ? or &amp;, follow with _= and then
+    # contain up to 25 other characters EXCEPT for an ampersand.
+    # An ampersand means that we're starting a second URL parameter.
+    #
+    # By stripping this parameter out, we can serve a cached response for
+    # the ever-changing URL since all but the &amp;_= parameter stay identical.
+
+    set req.url = regsuball(req.url,&quot;[?&amp;]_=[^&amp;]{1,25}&quot;,&quot;&quot;);
+    
+    # Set the backend to our director above.
+
+    set req.backend = backend;
+    
+    # Grace mode is magical. When you have a request for an object that is in
+    # the cache but has expired, Grace mode will continue to serve the old
+    # expired cache object for everyone except for the very first client
+    # to ask for it. Once the updated response is available for that first
+    # client, all of the other clients will then get the updated response.
+    #
+    # By setting grace to 5 minutes, we tell Varnish to continue to serve
+    # an outdated object for up to 5 minutes past its expiration to cover
+    # us while we fetch an updated response. Works great for slow pages.
+
+    set req.grace = 5m;
+    
+    # Pass the request along to the cache lookup.
+
+    return(lookup);
+}
+/*
+*
+* The cache miss subroutine.
+*
+*/
+sub vcl_miss {
+
+    # If someone sends along a PURGE request from our special list of
+    # acceptable addresses, we need to ban a stack of URLs.
+    #
+    # PURGE will look for a regular expression of matching URLs, something
+    # like this: curl -X PURGE &quot;http://my.site/ban/these/urls/.*&quot;
+    #
+    # The request above will ban all of the following URLs from cache:
+    #   http://my.site/ban/these/urls/like/this/url/
+    #   http://my.site/ban/these/urls/like/that/url/
+    #   http://my.site/ban/these/urls/even/this/?monkey=hammer&amp;foo=baz
+    #
+    # This code is located in vcl_miss because you shouldn't have a page
+    # that matches your regex. If you think you might, this code can also
+    # go in the vcl_hit subroutine below.
+
+    if (req.request == &quot;PURGE&quot;) {
+        ban_url(req.url);
+        error 200 &quot;Miss and banned, sire.&quot;;
+    }
+
+    # Pass this cache-missed request along to be fetched from the backend.
+    return(fetch);
+}
+/*
+*
+* The hit subroutine.
+*
+*/
+sub vcl_hit {
+
+    # A PRIME request is for a single URL, and it will usually be delivered
+    # by two consecutive requests, like this:
+    #
+    # curl -X PRIME &quot;http://my.site/election/dashboard/
+    # curl -X GET &quot;http//my.site/election/dashboard/
+    # 
+    # A PRIME request won't just ban the object from the cache; it's much
+    # sneakier than that. PRIME will set the cache object to expire 1 second
+    # into the future. This way, Varnish will cover your following GET request
+    # by sending the now-stale cache object to every other client while your
+    # GET request loads the page from the backend.
+    #
+    # Real-life story: If you have a big, slow page that you need to occasionally
+    # refresh as new data becomes available, you can use this method to expire
+    # and then reload the cache object without anyone on the internet ever
+    # having to wait for your big, slow page to load. Thanks to Jeff Larson and
+    # Chris Groskopf the idea.
+    
+    if (req.request == &quot;PRIME&quot;) {
+        set obj.ttl = 1s;
+        error 200 &quot;USDA PRIME.&quot;;
+    }
+
+    # Pass the request on to the deliver subroutine.
+
+    return(deliver);
+}
+/*
+*
+* The subroutine which fetches a response from the backend.
+*
+*/
+sub vcl_fetch {
+
+    # Set this object to live in the cache for an hour.
+
+    set beresp.ttl = 1h;
+
+    # Set this object to stick around in the cache for an extra 5 minutes
+    # in case we need to serve it for grace mode.
+    
+    set beresp.grace = 5m;
+    
+    # Make this cacheable.
+
+    set beresp.http.X-Cacheable = &quot;YES&quot;;
+    
+    # Defeat the Vary header.
+
+    unset beresp.http.Vary;
+    
+    # Send us along to the deliver subroutine.
+
+    return(deliver);
+}
+/*
+*
+* The subroutine which delivers the response to the client.
+*
+*/
+sub vcl_deliver {
+
+    # Troubleshooting Varnish can be hard. It's much easier when you
+    # send along some custom headers letting you know if the response
+    # was a cache hit or not.
+    #
+    # This particular block passes along HIT/MISS along with a count.
+
+    if (obj.hits &gt; 0) {
+        set resp.http.X-Cache = &quot;HIT&quot;;    
+        set resp.http.X-Cache-Hits = obj.hits;
+        set resp.http.X-Cache-Backend = req.backend;
+    } else {
+        set resp.http.X-Cache = &quot;MISS&quot;;    
+    }
+    
+    # Have a little fun.
+    
+    set resp.http.X-Inception-Horn = &quot;Brrrrrrnk.&quot;;
+    
+    # Return the response to the client.
+
+    return(deliver);
+}</code></pre></noscript></div>
+</p>
+
+<p>This sums up almost everything I had to learn about configuring Varnish this week, especially the bits about jQuery and grace mode.</p>
+]]></content>
+  </entry>
+  
+</feed>
