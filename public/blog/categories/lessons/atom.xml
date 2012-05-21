@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Lessons | Architecting Confusion]]></title>
   <link href="http://jeremy-blog.heroku.com//blog/categories/lessons/atom.xml" rel="self"/>
   <link href="http://jeremy-blog.heroku.com//"/>
-  <updated>2012-01-09T22:18:45-05:00</updated>
+  <updated>2012-05-20T21:49:54-04:00</updated>
   <id>http://jeremy-blog.heroku.com//</id>
   <author>
     <name><![CDATA[Jeremy Bowers]]></name>
@@ -40,323 +40,281 @@
 <p><strong>Hit</strong>: sub vcl_recv > sub vcl_hit > sub vcl_deliver</p>
 
 <p>A complete Varnish configuration file will need to contain directions for both of these paths. This is a bare-bones VCL, commented for your viewing pleasure.
-<div><script src='https://gist.github.com/1542949.js?file='></script>
-<noscript><pre><code>/*
-*
-* First, set up a backend to answer the request if there's not a cache hit.
-*
-*/
-backend default {
-
-    # Set a host.
-    .host = &quot;192.168.1.100&quot;;
-
-    # Set a port. 80 is normal Web traffic.
-    .port = &quot;8000&quot;;
-}
-/*
-*
-* Next, configure the &quot;receive&quot; subroutine.
-*
-*/
-sub vcl_recv {
-    
-    # Use the backend we set up above to answer the request if it's not cached.
-    set req.backend = default;
-    
-    # Pass the request along to lookup to see if it's in the cache.    
-    return(lookup);
-}
-/*
-*
-* Next, let's set up the subroutine to deal with cache misses.
-*
-*/
-sub vcl_miss {
-    
-    # We're not doing anything fancy. Just pass the request along to the
-    # subroutine which will fetch something from the backend.
-    return(fetch);
-}
-/*
-*
-* Now, let's set up a subroutine to deal with cache hits.
-*
-*/
-sub vcl_hit {
-    
-    # Again, nothing fancy. Just pass the request along to the subroutine
-    # which will deliver a result from the cache.
-    return(deliver);
-}
-/*
-*
-* This is the subroutine which will fetch a response from the backend.
-* It's pretty fancy because this is where the basic logic for caching is set.
-*
-*/
-sub vcl_fetch {
-
-    # Get the response. Set the cache lifetime of the response to 1 hour.
-    set beresp.ttl = 1h;
-
-    # Indicate that this response is cacheable. This is important.
-    set beresp.http.X-Cacheable = &quot;YES&quot;;
-    
-    # Some backends *cough* Django *cough* will assign a Vary header for
-    # each User-Agent which visits the site. Varnish will store a separate
-    # copy of the page in the cache for each instance of the Vary header --
-    # one for each User-Agent which visits the site. This is bad. So we're
-    # going to strip away the Vary header.
-    unset beresp.http.Vary;
-    
-    # Now pass this backend response along to the cache to be stored and served.
-    return(deliver);
-}
-/*
-*
-* Finally, let's set up a subroutine which will deliver a response to the client.
-*
-*/
-sub vcl_deliver {
-    
-    # Nothing fancy. Just deliver the goods.
-    # Note: Both cache hits and cache misses will use this subroutine.
-    return(deliver);
-}</code></pre></noscript></div>
-</p>
+{% gist 1542949 %}</p>
 
 <p>Here's a much more complex VCL with support for PURGE, PRIME and some tricks for jQuery AJAX and parsing JSON.
-<div><script src='https://gist.github.com/1542992.js?file='></script>
-<noscript><pre><code>/*
-*
-* Instead of a single backend, let's set up a more complex multi-server director.
-* This director will randomly assign each request to one of three application servers.
-*
-*/
-director backend random {
-    .retries = 5;
-    {
-        .backend  = {
-            .host = &quot;a.website.com&quot;;
-            .port = &quot;8000&quot;;
-        }
-        .weight = 1;
-    }
-    {
-        .backend  = {
-            .host = &quot;b.website.com&quot;;
-            .port = &quot;8000&quot;;
-        }
-        .weight = 1;
-    }
-    {
-        .backend  = {
-            .host = &quot;c.website.com&quot;;
-            .port = &quot;8000&quot;;
-        }
-        .weight = 1;
-    }
-}
-/*
-*
-* Next, let's prepare a feature where we can purge or prime URLs.
-* We don't want just anyone to do this. So we'll limit this special
-* request type to only people on the local network.
-*
-*/
-acl purge_prime {
-    &quot;127.0.0.1&quot;;
-    &quot;10.0.0.0&quot;/8;
-    &quot;172.16.0.0&quot;/12;
-}
-/*
-*
-* Let's set up the receive subroutine for incoming traffic.
-*
-*/
-sub vcl_recv {
-
-    # First, check to see if this is a special PURGE request.
-    # If it is, and the client isn't in our special access
-    # control list above, send them a cheeky message.
-
-    if (req.request == &quot;PURGE&quot;) {
-        if (!client.ip ~ purge_prime) {
-            error 405 &quot;No purge for you. (&quot; + client.ip + &quot;)&quot;;
-        }
-    }
-
-    # Same for PRIME requests. 
-
-    if (req.request == &quot;PRIME&quot;) {
-        if (!client.ip ~ purge_prime) {
-            error 405 &quot;No priming for you. (&quot; + client.ip + &quot;)&quot;;
-        }
-    }
-    
-    # You know, people really like to use jQuery.
-    # The jQuery $.ajax() and similar functions will pull JSON from an API
-    # behind your Varnish server. Sadly, browsers will cache the JSON
-    # response basically forever unless you use the cache: false declaration.
-    #
-    # In practice, this just appends a new URL parameter to the request, like
-    # &amp;_=1234567890, but it changes with each request. This sucks for caching.
-    #
-    # This function performs a regex substitution. The regex here matches
-    # URL parameters that start with ? or &amp;, follow with _= and then
-    # contain up to 25 other characters EXCEPT for an ampersand.
-    # An ampersand means that we're starting a second URL parameter.
-    #
-    # By stripping this parameter out, we can serve a cached response for
-    # the ever-changing URL since all but the &amp;_= parameter stay identical.
-
-    set req.url = regsuball(req.url,&quot;[?&amp;]_=[^&amp;]{1,25}&quot;,&quot;&quot;);
-    
-    # Set the backend to our director above.
-
-    set req.backend = backend;
-    
-    # Grace mode is magical. When you have a request for an object that is in
-    # the cache but has expired, Grace mode will continue to serve the old
-    # expired cache object for everyone except for the very first client
-    # to ask for it. Once the updated response is available for that first
-    # client, all of the other clients will then get the updated response.
-    #
-    # By setting grace to 5 minutes, we tell Varnish to continue to serve
-    # an outdated object for up to 5 minutes past its expiration to cover
-    # us while we fetch an updated response. Works great for slow pages.
-
-    set req.grace = 5m;
-    
-    # Pass the request along to the cache lookup.
-
-    return(lookup);
-}
-/*
-*
-* The cache miss subroutine.
-*
-*/
-sub vcl_miss {
-
-    # If someone sends along a PURGE request from our special list of
-    # acceptable addresses, we need to ban a stack of URLs.
-    #
-    # PURGE will look for a regular expression of matching URLs, something
-    # like this: curl -X PURGE &quot;http://my.site/ban/these/urls/.*&quot;
-    #
-    # The request above will ban all of the following URLs from cache:
-    #   http://my.site/ban/these/urls/like/this/url/
-    #   http://my.site/ban/these/urls/like/that/url/
-    #   http://my.site/ban/these/urls/even/this/?monkey=hammer&amp;foo=baz
-    #
-    # This code is located in vcl_miss because you shouldn't have a page
-    # that matches your regex. If you think you might, this code can also
-    # go in the vcl_hit subroutine below.
-
-    if (req.request == &quot;PURGE&quot;) {
-        ban_url(req.url);
-        error 200 &quot;Miss and banned, sire.&quot;;
-    }
-
-    # Pass this cache-missed request along to be fetched from the backend.
-    return(fetch);
-}
-/*
-*
-* The hit subroutine.
-*
-*/
-sub vcl_hit {
-
-    # A PRIME request is for a single URL, and it will usually be delivered
-    # by two consecutive requests, like this:
-    #
-    # curl -X PRIME &quot;http://my.site/election/dashboard/
-    # curl -X GET &quot;http//my.site/election/dashboard/
-    # 
-    # A PRIME request won't just ban the object from the cache; it's much
-    # sneakier than that. PRIME will set the cache object to expire 1 second
-    # into the future. This way, Varnish will cover your following GET request
-    # by sending the now-stale cache object to every other client while your
-    # GET request loads the page from the backend.
-    #
-    # Real-life story: If you have a big, slow page that you need to occasionally
-    # refresh as new data becomes available, you can use this method to expire
-    # and then reload the cache object without anyone on the internet ever
-    # having to wait for your big, slow page to load. Thanks to Jeff Larson and
-    # Chris Groskopf the idea.
-    
-    if (req.request == &quot;PRIME&quot;) {
-        set obj.ttl = 1s;
-        error 200 &quot;USDA PRIME.&quot;;
-    }
-
-    # Pass the request on to the deliver subroutine.
-
-    return(deliver);
-}
-/*
-*
-* The subroutine which fetches a response from the backend.
-*
-*/
-sub vcl_fetch {
-
-    # Set this object to live in the cache for an hour.
-
-    set beresp.ttl = 1h;
-
-    # Set this object to stick around in the cache for an extra 5 minutes
-    # in case we need to serve it for grace mode.
-    
-    set beresp.grace = 5m;
-    
-    # Make this cacheable.
-
-    set beresp.http.X-Cacheable = &quot;YES&quot;;
-    
-    # Defeat the Vary header.
-
-    unset beresp.http.Vary;
-    
-    # Send us along to the deliver subroutine.
-
-    return(deliver);
-}
-/*
-*
-* The subroutine which delivers the response to the client.
-*
-*/
-sub vcl_deliver {
-
-    # Troubleshooting Varnish can be hard. It's much easier when you
-    # send along some custom headers letting you know if the response
-    # was a cache hit or not.
-    #
-    # This particular block passes along HIT/MISS along with a count.
-
-    if (obj.hits &gt; 0) {
-        set resp.http.X-Cache = &quot;HIT&quot;;    
-        set resp.http.X-Cache-Hits = obj.hits;
-        set resp.http.X-Cache-Backend = req.backend;
-    } else {
-        set resp.http.X-Cache = &quot;MISS&quot;;    
-    }
-    
-    # Have a little fun.
-    
-    set resp.http.X-Inception-Horn = &quot;Brrrrrrnk.&quot;;
-    
-    # Return the response to the client.
-
-    return(deliver);
-}</code></pre></noscript></div>
-</p>
+{% gist 1542992 %}</p>
 
 <p>This sums up almost everything I had to learn about configuring Varnish this week, especially the bits about jQuery and grace mode.</p>
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[Django, Nginx and uWSGI in production]]></title>
+    <link href="http://jeremy-blog.heroku.com//blog/2010/10/29/django-nginx-and-uwsgi-production-serving-millions-page-views/"/>
+    <updated>2010-10-29T20:27:00-04:00</updated>
+    <id>http://jeremy-blog.heroku.com//blog/2010/10/29/django-nginx-and-uwsgi-production-serving-millions-page-views</id>
+    <content type="html"><![CDATA[<p>Upgrading your server stack to Nginx and uWSGI is easier than you'd think. Here's the process I've worked through at the St. Petersburg Times and that we're using in production on several sites like PolitiFact, Mug Shots and HomeTeam. We're now serving millions of page views per year on Nginx and uWSGI, and I'll show you how we're doing it.</p>
+
+<!-- more -->
+
+
+<p>First, some light reading. Check out Simon Westphal's excellent post "Running Django with Nginx and uWSGI". This post was the framework for our approach, though we've updated some pieces.</p>
+
+<p>Second, the environment. We use (and highly recommend) Rackspace Cloud Servers and Ubuntu 10.04 LTS "Lucid". These instructions presume you have a working installation of Ubuntu 10.04, a working Django project that you're currently serving up some other way, and a reasonable knowledge of getting around in a Linux shell.</p>
+
+<h2>Install some software</h2>
+
+<p><code>
+sudo apt-get install binutils python-psycopg2 python-setuptools libgeos-3.1.0 libgeos-c1 libgdal1-1.6.0 python2.6 python2.6-dev psmisc subversion git-core mercurial python-imaging locate ntp python-dateutil libxml2-dev libpcre3 libpcre3-dev nginx
+</code></p>
+
+<p>This is a slew of software to install, but we use this stuff all the time. You've probably got much of this installed on your system by default if you're running Django projects on it now, but it never hurts to be sure. Also, notice that we install Nginx (for the conf files and stuff) even though we're going to replace the binary later.</p>
+
+<p>Also, let's create some directories. At the Times, we use /opt/ for most of our stuff, so I'll demonstrate what we do.</p>
+
+<p><code>
+mkdir /opt/django-projects/
+mkdir /opt/run/
+mkdir /opt/lock/
+mkdir /opt/log/
+sudo chmod -R 777 /opt/run/ /opt/log/ /opt/lock/ /opt/django-projects/
+</code>
+Why create shadow versions of /var/log/, /var/lock/ and /var/run/? Simple: Rackspace blitzes user-created files in those directories if you're unfortunate enough to encounter a reboot. Holding those pid, log and lock files in /opt/ is a bit non-standard, but it means you'll never be troubleshooting why Nginx isn't restarting after a reboot.</p>
+
+<h2>Get and install Nginx and uWSGI</h2>
+
+<p><code>
+cd /opt/
+wget http://projects.unbit.it/downloads/uwsgi-0.9.6.4.tar.gz
+wget http://nginx.org/download/nginx-0.8.51.tar.gz
+tar -xzf nginx-0.8.51.tar.gz
+tar -xzf uwsgi-0.9.6.4.tar.gz
+</code></p>
+
+<p>The newer versions of Nginx don't even require compiling a special module for uWSGI -- the support is built-in. This is very nice.
+Let's compile and install uWSGI. Wait, you have compiled something before, right? It's really not that bad, I swear. Check this out:</p>
+
+<p><code>
+cd uwsgi-0.9.6.4
+make
+cp uwsgi /usr/sbin/
+</code></p>
+
+<p>Was that really so bad? I didn't think so. The Nginx part of this is a little bit more difficult, but it's not so bad either.</p>
+
+<p><code>
+cd ../nginx-0.8.51/
+touch /opt/run/nginx.pid
+touch /opt/lock/nginx.lock
+touch /opt/log/nginx/error.log
+./configure --conf-path=/etc/nginx/nginx.conf\
+--error-log-path=/opt/log/nginx/error.log\
+--pid-path=/opt/run/nginx.pid\
+--lock-path=/opt/lock/nginx.lock\
+--sbin-path=/usr/sbin\
+--without-http-cache
+make
+make install
+</code></p>
+
+<p>YMMV: I've compiled this version of Nginx without things like SSL support and other goodies. Check about on the internet if you're interested in a more fully-featured version.</p>
+
+<h2>Prep the WSGI interface for your Django project</h2>
+
+<p>Presuming you've installed your Django project to /opt/django-projects/foo/, here's the kinds of things you'd need to do to make your Django app WSGI-friendly.</p>
+
+<p><code>
+cd /opt/django-projects/foo/
+mkdir uwsgi
+touch uwsgi/__init__.py
+nano -w uwsgi/wsgi_app.py
+</code></p>
+
+<p>Crap. Now everyone knows I'm not a vi user. And that I'm not appropriately 1337 enough to use a nuclear-powered text editor. Anyway, here's the bits you need to include in that wsgi_app.py.</p>
+
+<p>```</p>
+
+<h1>! /usr/bin/env python</h1>
+
+<p>import sys
+import os
+import django.core.handlers.wsgi
+sys.path.append('/opt/django-projects/')
+os.environ['DJANGO_SETTINGS_MODULE'] = 'foo.settings'
+application = django.core.handlers.wsgi.WSGIHandler()
+```</p>
+
+<h2>Introduce uWSGI to Upstart</h2>
+
+<p>Upstart is installed as an init daemon on Ubuntu 10.04, and I much prefer writing Upstart conf files to writing Init scripts. Here's what you'll need to do to make sure that Upstart is familiar with uWSGI.</p>
+
+<p><code>
+cd /etc/init/
+nano -w foo.conf
+Creating this foo.conf file in /etc/init/ gives Upstart the information about the uWSGI instances for your project. That's how we'll control uWSGI and your app — through Upstart commands like "sudo service foo restart". Here's what you'll need to put in that foo.conf file.
+description "uWSGI server for Project Foo"
+start on runlevel [2345]
+stop on runlevel [!2345]
+respawn
+exec /usr/sbin/uwsgi --socket /opt/run/foo.sock\
+--chmod-socket --module wsgi_app\
+--pythonpath /opt/django-projects/foo/uwsgi\
+-p 1
+</code></p>
+
+<p>The line with exec /usr/sbin/uwsgi demonstrates some options you might be interested in.</p>
+
+<ul>
+<li>-p 1 means to run a single uWSGI process. We run ours in production with -p 12 on a 1024 MB app server.</li>
+<li>-t 15 means to kill any process which takes longer than 15 seconds to execute. Mike Tigas uses --harakiri (same as -t) 30 on his personal site.</li>
+<li>--logto /opt/foo_uwsgi.log would write an access log to the file foo_uwsgi.log.</li>
+</ul>
+
+
+<p>There are many more options available at the uWSGI documentation site. We're currently playing around with things like the process reaper and some of the more esoteric buffer/socket options.</p>
+
+<p>You'll need to let Upstart know you've added a new daemon for it with this command.</p>
+
+<p><code>
+initctl reload-configuration
+</code></p>
+
+<p>Then, you can do something like this to start your uWSGI instance.
+<code>
+sudo service foo start
+</code></p>
+
+<p>When you make a change that needs your project to reinitialize (like a change to a View or to the settings.py file), you can just do something like this.</p>
+
+<p><code>
+sudo service foo restart
+</code></p>
+
+<h2>Configuring Nginx</h2>
+
+<p>The last piece of the puzzle is configuring Nginx to talk to uWSGI. Let's talk for a moment about sockets; in the uWSGI configuration above, there's a command-line flag like --socket /opt/run/foo.sock. A socket is a filesystem-level method for two processes to communicate. Most WSGI or FCGI methods use TCP sockets for communication, which introduces the additional overhead of encoding requests and responses into TCP and then decoding them on the other end. Because uWSGI uses UNIX sockets for communication with the Web server (in this case, Nginx), it avoids that overhead and gains a bit of speed.</p>
+
+<p>Newer versions of Nginx have a uWSGI socket interface already built-in — we just need to signal to Nginx that we're using uWSGI and which socket we'd like to pass the request along to. Here's a sample version for you to use in an Nginx configuration file.</p>
+
+<p>```
+user www-data;
+worker_processes 1;
+error_log /opt/log/nginx.log;
+pid /opt/run/nginx.pid;
+events {</p>
+
+<pre><code>worker_connections 1024;
+use epoll;
+</code></pre>
+
+<p>}
+http {</p>
+
+<pre><code>include /etc/nginx/mime.types;
+default_type application/octet-stream;
+access_log /var/log/nginx/access.log;
+keepalive_timeout 65;
+proxy_read_timeout 200;
+sendfile on;
+tcp_nopush on;
+tcp_nodelay on;
+gzip on;
+gzip_min_length 1000;
+gzip_proxied any;
+gzip_types text/plain text/css text/xml
+application/x-javascript application/xml
+application/atom+xml text/javascript;
+proxy_next_upstream error;
+server {
+listen 80;
+server_name www.tampabay.com tampabay.com;
+client_max_body_size 50M;
+root /var/www/ht2;
+        location / {
+            uwsgi_pass unix://opt/run/preps.sock;
+            include uwsgi_params;
+        }
+}
+</code></pre>
+
+<p>}
+```</p>
+
+<p>Okay, so let's talk about what's happening here. Feel free to skip this if you're already a master Nginx hacker.</p>
+
+<p><code>user www-data;</code></p>
+
+<p>Run as the user ww-data.</p>
+
+<p><code>worker_processes: 1;</code></p>
+
+<p>Use a single worker process. We use up to 3 on some boxes which take very heavy load, but only one on our application servers.</p>
+
+<p><code>error_log: /opt/log/nginx.log;</code></p>
+
+<p>Log errors to a file in /opt/log/. Touch this file before starting Nginx.</p>
+
+<p><code>pid /opt/run/nginx.pid;</code></p>
+
+<p>Use a pid file in /opt/run/. Touch this file before starting Nginx.</p>
+
+<p>```
+events {</p>
+
+<pre><code>worker_connections 1024;
+use epoll;
+</code></pre>
+
+<p>}
+```</p>
+
+<p>Use 1024 connections per worker and use epoll as the quarterback for distribution. On some of our boxes, we use up to 10000 connections per worker.</p>
+
+<p><code>
+include /etc/nginx/mime.types;
+default_type application/octet-stream;
+access_log /var/log/nginx/access.log;
+keepalive_timeout 65;
+proxy_read_timeout 200;
+sendfile on;
+tcp_nopush on;
+tcp_nodelay on;
+gzip on;
+gzip_min_length 1000;
+gzip_proxied any;
+gzip_types text/plain text/css text/xml
+application/x-javascript application/xml
+application/atom+xml text/javascript;
+proxy_next_upstream error;
+</code></p>
+
+<p>Much basic configuration baloney that we've gleaned from a million places on the Web. These are basically just sensible defaults. Change as you require.</p>
+
+<p>```
+server {
+listen 80;
+server_name www.tampabay.com tampabay.com;
+client_max_body_size 50M;
+root /var/www/ht2;</p>
+
+<pre><code>location / {
+    uwsgi_pass unix://opt/run/preps.sock;
+    include uwsgi_params;
+}
+</code></pre>
+
+<p>}
+```</p>
+
+<p>Initiate another server and have it listen on port 80. Pass any request along to the socket for our uWSGI project (in this case, preps).
+You can start Nginx for the first time by doing something like this.</p>
+
+<p><code>
+sudo service nginx start
+</code></p>
+
+<p>You won't need to restart Nginx if you're making a code change, just uWSGI.</p>
 ]]></content>
   </entry>
   
